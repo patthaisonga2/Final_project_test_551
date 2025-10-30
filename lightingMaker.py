@@ -7,6 +7,7 @@ except:
 
 import maya.cmds as cmds
 import maya.OpenMayaUI as omui
+from functools import partial
 from . import utill as util
 import os
 
@@ -70,12 +71,11 @@ class LightingMaker(QtWidgets.QDialog):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(base_dir, "light_icons")
 
-        # List of light types + icons
         light_types = [
             ("Area Light", "aiAreaLight", "Area Light.png"),
             ("Skydome Light", "aiSkyDomeLight", "Skydome Light.png"),
             ("Mesh Light", "aiMeshLight", "Mesh Light.png"),
-            ("Photometric", "aiPhotometricLight.png", "Photometric.png"),
+            ("Photometric", "aiPhotometricLight", "Photometric.png"),
             ("Light Portal", "aiLightPortal", "Light Portal.png"),
             ("Physical Sky", "aiPhysicalSky", "Physical Sky.png"),
         ]
@@ -93,35 +93,27 @@ class LightingMaker(QtWidgets.QDialog):
             else:
                 print(f"⚠️ Missing icon: {icon_full_path}")
 
-            btn.clicked.connect(self.get_light_type_function(node, btn))
+            btn.clicked.connect(partial(self.select_light_type, node, btn))
             grid.addWidget(btn, i // 3, i % 3)
             self.light_buttons[node] = btn
 
         type_layout.addLayout(grid)
         self.main_layout.addWidget(type_box)
 
+        # ---------- Group: Timezone ----------
         timezone_box = QtWidgets.QGroupBox("Timezone")
         timezone_box.setStyleSheet("QGroupBox {font-weight: bold; border: 1px solid gray; margin-top: 6px;}")
         tz_layout = QtWidgets.QHBoxLayout(timezone_box)
 
-        self.light_buttons = {}
-        grid = QtWidgets.QGridLayout()
-
         self.tz_buttons = {}
-        tz_options = ["Morning", "Noon", "Evening", "Night"]
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(base_dir, "light_icons")
-
-        # List of light types + icons
-        light_types = [
-            ("Morning","Morning.png"),
-            ("Noon","Noon.png"),
-            ("Evening","Evening.png"),
+        tz_options = [
+            ("Morning", "Morning.png"),
+            ("Noon", "Noon.png"),
+            ("Evening", "Evening.png"),
             ("Night", "Night.png"),
         ]
 
-        for label, icon_file in light_types:
-            
+        for label, icon_file in tz_options:
             btn = QtWidgets.QToolButton()
             btn.setText(label)
             btn.setCheckable(True)
@@ -134,8 +126,7 @@ class LightingMaker(QtWidgets.QDialog):
             else:
                 print(f"⚠️ Missing icon: {full_icon_path}")
 
-            btn.clicked.connect(lambda checked, l=label, b=btn: self.get_timezone_function(l, b)())
-
+            btn.clicked.connect(partial(self.select_timezone, label, btn))
             tz_layout.addWidget(btn)
             self.tz_buttons[label] = btn
 
@@ -183,50 +174,52 @@ class LightingMaker(QtWidgets.QDialog):
         btn_layout.addWidget(self.cancel_btn)
         self.main_layout.addLayout(btn_layout)
 
-        self.selected_type = "aiSkyDomeLight"
-        self.selected_timezone = "Noon"
+        self.selected_type = None
+        self.selected_timezone = None
         self.color = QtGui.QColor(255, 255, 255)
 
         if not cmds.pluginInfo("mtoa", query=True, loaded=True):
             cmds.loadPlugin("mtoa")
         cmds.setAttr("defaultRenderGlobals.currentRenderer", "arnold", type="string")
 
-    def get_light_type_function(self, node_type, btn):
-        def select_light_type():
-            for n, b in self.light_buttons.items():
-                b.setChecked(False)
-                b.setStyleSheet("background-color: #333; color: white;")
-            btn.setChecked(True)
-            btn.setStyleSheet("background-color: #7A33FF; color: white; border: 2px solid #7A33FF;")
-            self.selected_type = node_type
-        return select_light_type
+    def select_light_type(self, node_type, btn):
+        for n, b in self.light_buttons.items():
+            b.setChecked(False)
+            b.setStyleSheet("background-color: #333; color: white;")
+        btn.setChecked(True)
+        btn.setStyleSheet("background-color: #7A33FF; color: white; border: 2px solid #7A33FF;")
+        self.selected_type = node_type
 
-    # ---------- Select Timezone ----------
-    def get_timezone_function(self, tz, btn):
-        def select_timezone():
-            for t, b in self.tz_buttons.items():
-                b.setChecked(False)
-                b.setStyleSheet("background-color: #333; color: white;")
-            btn.setChecked(True)
-            btn.setStyleSheet("background-color: #7A33FF; color: white; border: 2px solid #7A33FF;")
-            self.selected_timezone = tz
+    def select_timezone(self, tz, btn):
+        for t, b in self.tz_buttons.items():
+            b.setChecked(False)
+            b.setStyleSheet("background-color: #333; color: white;")
+        btn.setChecked(True)
+        btn.setStyleSheet("background-color: #7A33FF; color: white; border: 2px solid #7A33FF;")
+        self.selected_timezone = tz
 
-            intensity, color = util.apply_timezone_preset(tz)
-            self.intensity_spin.setValue(intensity)
-            self.color = QtGui.QColor.fromRgbF(*color)
-            self.color_button.setStyleSheet(f"background-color: {self.color.name()};")
-        return select_timezone
+        intensity, color = util.apply_timezone_preset(tz)
+        self.intensity_spin.setValue(intensity)
+        self.color = QtGui.QColor.fromRgbF(*color)
+        self.color_button.setStyleSheet(f"background-color: {self.color.name()};")
 
-    # ---------- Pick Color ----------
     def pick_color(self):
         color = QtWidgets.QColorDialog.getColor(self.color, self, "Select Light Color")
         if color.isValid():
             self.color = color
             self.color_button.setStyleSheet(f"background-color: {color.name()};")
 
-    # ---------- Create Light ----------
     def create_light(self):
         name = self.name_edit.text().strip()
+
+        if not self.selected_type:
+            QtWidgets.QMessageBox.warning(self, "Warning", "Please select a light type.")
+            return
+
+        if not self.selected_timezone:
+            QtWidgets.QMessageBox.warning(self, "Warning", "Please select a timezone.")
+            return
+
         light_type = self.selected_type
         light = util.create_light(light_type, name)
         if not light:
